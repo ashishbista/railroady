@@ -40,7 +40,9 @@ class ModelsDiagram < AppDiagram
     STDERR.puts "Processing #{current_class}" if @options.verbose
 
     generated =
-      if defined?(CouchRest::Model::Base) && current_class.new.is_a?(CouchRest::Model::Base)
+      if current_class.ancestors.include? (SimplyStored::Couch)
+        process_simply_stored_model(current_class)
+      elsif defined?(CouchRest::Model::Base) && current_class.new.is_a?(CouchRest::Model::Base)
         process_couchrest_model(current_class)
       elsif defined?(Mongoid::Document) && current_class.new.is_a?(Mongoid::Document)
         process_mongoid_model(current_class)
@@ -249,6 +251,41 @@ class ModelsDiagram < AppDiagram
     true
   end
 
+  def process_simply_stored_model(current_class)
+    node_attribs = []
+
+    if @options.brief
+      node_type = 'model-brief'
+    else
+      node_type = 'model'
+      # Collect model's content columns
+      content_columns = current_class.properties
+
+      if @options.hide_magic
+        magic_fields = [
+          "created_at", "updated_at",
+          "ruby_class", "_id", "_rev"
+        ]
+        content_columns = content_columns.select {|c| !magic_fields.include?(c.name) }
+      end
+
+      content_columns.each do |a|
+        content_column = a.name
+        if a.try(:options)
+          process_simply_stored_relationship current_class.name, a
+        end
+        begin
+          content_column += " :#{a.type}" unless @options.hide_types || a.type.nil?
+          node_attribs << content_column
+        rescue
+        end
+      end
+    end
+
+    @graph.add_node [node_type, current_class.name, node_attribs]
+
+    true
+  end
   # Process a model association
   def process_association(class_name, assoc)
     STDERR.puts "- Processing model association #{assoc.name.to_s}" if @options.verbose
@@ -334,6 +371,26 @@ class ModelsDiagram < AppDiagram
 
     @graph.add_edge [rel_type, class_name, assoc_class_name, assoc_name ]
   end
+
+
+  def process_simply_stored_relationship(class_name, relation)
+    STDERR.puts "- Processing SimplyStored model relationship #{relation.name.to_s}" if @options.verbose
+
+    assoc_class_name = relation.options[:class_name]
+
+    assoc_name = relation.name
+
+    # TO BE IMPROVED
+    rel_type = 'many-many' # default value for ManyToOne and ManyToMany
+    if relation.is_a?(SimplyStored::Couch::BelongsTo::Property)
+      rel_type = 'one-one'
+    elsif relation.is_a?(SimplyStored::Couch::HasMany::Property)
+      rel_type = 'one-many'
+    end
+
+    @graph.add_edge [rel_type, class_name, assoc_class_name, assoc_name ]
+  end
+
 
 end # class ModelsDiagram
 
